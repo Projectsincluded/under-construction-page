@@ -96,19 +96,25 @@ jobs:
 
       # Comment the preview URL on the PR once the environment answers.
       #
-      # The URL is deterministic (`<short>-pr-<n>.dev.projectsincluded.net`), so the only thing worth
-      # waiting for is the deployment itself — Argo CD picks the image up from the ApplicationSet.
-      # A single marker comment is UPDATED on every push instead of one comment per commit.
-      # `ucp` must match the `<short>` prefix in the cluster's ApplicationSet for this repo.
+      # The URL is deterministic (`<32-hex>.dev.projectsincluded.net`, derived below), so the only
+      # thing worth waiting for is the deployment itself — Argo CD picks the image up from the
+      # ApplicationSet. A single marker comment is UPDATED on every push instead of one per commit.
       - name: Comment the preview URL on the PR
         if: env.PUSH_IMAGE == 'true' && github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
-          PREVIEW_URL: https://ucp-pr-${{ github.event.pull_request.number }}.dev.projectsincluded.net/
           MARKER: '<!-- preview-environment -->'
         run: |
           set -eu
+          # The preview id must match the cluster's ApplicationSet exactly:
+          #   sha256("<owner>/<repo>#<number>" lowercased), first 32 hex chars
+          # (see kubernetes-infrastructure: bootstrap/applications/previews.yaml). A mismatch just
+          # comments a URL that serves nothing, so keep the two in step.
+          PREVIEW_ID=$(printf '%s#%s' \
+            "$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" "$PR" \
+            | sha256sum | cut -c1-32)
+          PREVIEW_URL="https://${PREVIEW_ID}.dev.projectsincluded.net/"
           status="not answering yet"
           for i in $(seq 1 24); do
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$PREVIEW_URL" || true)
